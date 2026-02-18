@@ -8,6 +8,24 @@
     @pointerup="onPointerUp"
     @pointerleave="onPointerUp"
   />
+  <div
+    v-if="isMobile"
+    class="joystick-container"
+    ref="joystickEl"
+    @touchstart.prevent="onJoystickStart"
+    @touchmove.prevent="onJoystickMove"
+    @touchend.prevent="onJoystickEnd"
+    @touchcancel.prevent="onJoystickEnd"
+  >
+    <div class="joystick-base">
+      <div
+        class="joystick-thumb"
+        :style="{
+          transform: `translate(${joystick.currentX}px, ${joystick.currentY}px)`,
+        }"
+      ></div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -23,6 +41,7 @@ const emit = defineEmits([
 ]);
 
 const canvasEl = ref(null);
+const joystickEl = ref(null);
 let socket = null;
 
 let raf = 0;
@@ -56,6 +75,26 @@ const PELLET_COLORS = [
   "#ff1493",
   "#ffd700",
 ];
+
+// --- Определение мобильного устройства ---
+const isMobile = ref(window.matchMedia("(max-width: 768px)").matches);
+
+function checkMobile() {
+  isMobile.value = window.matchMedia("(max-width: 768px)").matches;
+}
+window.addEventListener("resize", checkMobile);
+onBeforeUnmount(() => window.removeEventListener("resize", checkMobile));
+
+// --- Состояние джойстика ---
+const joystick = ref({
+  active: false,
+  angle: 0,
+  force: 0,
+  startX: 0,
+  startY: 0,
+  currentX: 0,
+  currentY: 0,
+});
 
 // --- Кеш изображений и функция загрузки ---
 const imageCache = new Map();
@@ -404,10 +443,32 @@ function update(dt) {
   const oldX = main.x;
   const oldY = main.y;
 
-  const targetAngle = Math.atan2(
-    state.pointer.y - main.y,
-    state.pointer.x - main.x,
-  );
+  // === УПРАВЛЕНИЕ: джойстик или мышь ===
+  let targetAngle;
+  let desiredSpeed;
+
+  if (joystick.value.active && joystick.value.force > 0.01) {
+    // Управление джойстиком
+    targetAngle = joystick.value.angle;
+    const baseSpeed =
+      main.mass <= MASS_THRESHOLD
+        ? SPEED_AT_THRESHOLD
+        : SPEED_AT_THRESHOLD * Math.sqrt(MASS_THRESHOLD / main.mass);
+    desiredSpeed = baseSpeed * joystick.value.force;
+  } else {
+    // Управление мышью / касанием (работает как раньше)
+    targetAngle = Math.atan2(
+      state.pointer.y - main.y,
+      state.pointer.x - main.x,
+    );
+    if (main.mass <= MASS_THRESHOLD) {
+      desiredSpeed = SPEED_AT_THRESHOLD;
+    } else {
+      desiredSpeed = SPEED_AT_THRESHOLD * Math.sqrt(MASS_THRESHOLD / main.mass);
+    }
+  }
+
+  // Плавный поворот к целевому углу
   let angleDiff = targetAngle - main.angle;
   while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
   while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
@@ -417,13 +478,6 @@ function update(dt) {
     main.angle += Math.sign(angleDiff) * maxTurn;
   } else {
     main.angle = targetAngle;
-  }
-
-  let desiredSpeed;
-  if (main.mass <= MASS_THRESHOLD) {
-    desiredSpeed = SPEED_AT_THRESHOLD;
-  } else {
-    desiredSpeed = SPEED_AT_THRESHOLD * Math.sqrt(MASS_THRESHOLD / main.mass);
   }
 
   const desiredVx = Math.cos(main.angle) * desiredSpeed;
@@ -760,7 +814,7 @@ function draw() {
       const img = imageCache.get(main.skinUrl);
       ctx.drawImage(img, main.x - r, main.y - r, r * 2, r * 2);
     } else {
-      // Градиент с фиксированным цветом (без использования demoSettings, чтобы избежать ошибки)
+      // Градиент с фиксированным цветом
       const grd = ctx.createRadialGradient(
         main.x,
         main.y,
@@ -769,7 +823,7 @@ function draw() {
         main.y,
         r,
       );
-      grd.addColorStop(0, "#00f5ff"); // <-- ИСПРАВЛЕНО: всегда дефолтный цвет
+      grd.addColorStop(0, "#00f5ff");
       grd.addColorStop(1, "rgba(0, 245, 255, 0.2)");
       ctx.fillStyle = grd;
       ctx.fill();
@@ -805,6 +859,47 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", resize);
   cancelAnimationFrame(raf);
 });
+
+// === МЕТОДЫ ДЖОЙСТИКА ===
+function onJoystickStart(e) {
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = joystickEl.value.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  joystick.value.startX = centerX;
+  joystick.value.startY = centerY;
+  joystick.value.active = true;
+  updateJoystickFromTouch(touch);
+}
+
+function onJoystickMove(e) {
+  e.preventDefault();
+  if (!joystick.value.active) return;
+  const touch = e.touches[0];
+  updateJoystickFromTouch(touch);
+}
+
+function onJoystickEnd(e) {
+  e.preventDefault();
+  joystick.value.active = false;
+  joystick.value.force = 0;
+  joystick.value.currentX = 0;
+  joystick.value.currentY = 0;
+}
+
+function updateJoystickFromTouch(touch) {
+  const maxDist = 50; // максимальное смещение джойстика в пикселях
+  const dx = touch.clientX - joystick.value.startX;
+  const dy = touch.clientY - joystick.value.startY;
+  const dist = Math.hypot(dx, dy);
+  const limitedDist = Math.min(dist, maxDist);
+  const angle = Math.atan2(dy, dx);
+  joystick.value.angle = angle;
+  joystick.value.force = limitedDist / maxDist;
+  joystick.value.currentX = Math.cos(angle) * limitedDist;
+  joystick.value.currentY = Math.sin(angle) * limitedDist;
+}
 
 // Экспортируемые методы
 function splitDash() {
@@ -842,5 +937,37 @@ defineExpose({ splitDash, eject, activateShield, activateTurbo, respawn });
   background: #09090b;
   touch-action: none;
   cursor: crosshair;
+}
+
+.joystick-container {
+  position: absolute;
+  bottom: 40px;
+  left: 40px;
+  width: 120px;
+  height: 120px;
+  z-index: 10;
+  touch-action: none;
+}
+
+.joystick-base {
+  width: 100%;
+  height: 100%;
+  background: rgba(30, 30, 40, 0.7);
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+.joystick-thumb {
+  width: 50px;
+  height: 50px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 15px #00f5ff;
+  transition: transform 0.02s;
+  will-change: transform;
 }
 </style>
