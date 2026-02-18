@@ -76,7 +76,7 @@ async function submit() {
       if (mode.value === "login" && data.token) {
         localStorage.setItem("token", data.token);
         localStorage.setItem("username", data.username);
-        router.push("/home");
+        router.push("/");
       } else if (mode.value === "register" && data.success) {
         alert("Registration successful!");
         mode.value = "login";
