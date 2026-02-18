@@ -1,0 +1,23 @@
+@import './base.css';
+
+#app {
+  min-height: 100vh;
+}
+
+/* Utility classes (small + intentional) */
+.n-container {
+  width: 100%;
+  max-width: var(--n-maxw);
+  margin: 0 auto;
+  padding: 0 var(--n-gutter);
+}
+
+.n-title {
+  font-family: Sora, Inter, system-ui, sans-serif;
+  letter-spacing: 0.8px;
+  font-weight: 600;
+}
+
+.n-subtle {
+  color: var(--n-text-dim);
+}

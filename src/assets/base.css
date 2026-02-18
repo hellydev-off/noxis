@@ -1,0 +1,150 @@
+/* NOXIS Design System (2026) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300..800&family=Sora:wght@200..800&display=swap');
+
+:root {
+  /* Core palette */
+  --n-bg-0: #050505;
+  --n-bg-1: #0b0b0f;
+  --n-text: #eaeaea;
+  --n-text-dim: rgba(234, 234, 234, 0.72);
+  --n-muted: rgba(234, 234, 234, 0.12);
+
+  --n-purple: #7c3aed;
+  --n-cyan: #00f5ff;
+  --n-danger: #ff3b5c;
+
+  /* Rarity */
+  --n-rare: var(--n-cyan);
+  --n-epic: var(--n-purple);
+  --n-legendary: #f7c84b;
+
+  /* Layout + spacing */
+  --n-maxw: 1200px;
+  --n-gutter: 24px;
+  --n-navh: 72px;
+  --n-topbarh: 76px;
+
+  --n-4: 4px;
+  --n-8: 8px;
+  --n-12: 12px;
+  --n-16: 16px;
+  --n-20: 20px;
+  --n-24: 24px;
+  --n-32: 32px;
+  --n-40: 40px;
+  --n-56: 56px;
+
+  /* Radii */
+  --n-r-12: 12px;
+  --n-r-16: 16px;
+  --n-r-20: 20px;
+  --n-r-pill: 999px;
+
+  /* Glass */
+  --n-glass: rgba(11, 11, 15, 0.55);
+  --n-glass-strong: rgba(11, 11, 15, 0.72);
+  --n-border: rgba(255, 255, 255, 0.08);
+  --n-border-strong: rgba(255, 255, 255, 0.12);
+
+  /* Glow + shadow */
+  --n-shadow-1: 0 10px 30px rgba(0, 0, 0, 0.55);
+  --n-glow-purple: 0 0 0 1px rgba(124, 58, 237, 0.25), 0 0 22px rgba(124, 58, 237, 0.22);
+  --n-glow-cyan: 0 0 0 1px rgba(0, 245, 255, 0.18), 0 0 22px rgba(0, 245, 255, 0.16);
+
+  /* Motion */
+  --n-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --n-fast: 160ms;
+  --n-med: 240ms;
+  --n-slow: 520ms;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--n-text);
+  background: radial-gradient(1200px 800px at 30% 20%, rgba(124, 58, 237, 0.12), transparent 55%),
+    radial-gradient(900px 700px at 70% 30%, rgba(0, 245, 255, 0.08), transparent 60%),
+    linear-gradient(160deg, var(--n-bg-0), var(--n-bg-1));
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14.5px;
+  line-height: 1.5;
+  letter-spacing: 0.2px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: rgba(124, 58, 237, 0.35);
+}
+
+/* Minimal scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(124, 58, 237, 0.45) rgba(255, 255, 255, 0.04);
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(124, 58, 237, 0.38);
+  border-radius: var(--n-r-pill);
+  border: 2px solid rgba(0, 0, 0, 0.4);
+}
+*::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Page transitions: fade + slight zoom */
+.page-enter-active,
+.page-leave-active {
+  transition:
+    opacity var(--n-med) var(--n-ease),
+    transform var(--n-med) var(--n-ease),
+    filter var(--n-med) var(--n-ease);
+}
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(8px) scale(0.992);
+  filter: blur(6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active {
+    transition: opacity 1ms linear;
+  }
+  .page-enter-from,
+  .page-leave-to {
+    transform: none;
+    filter: none;
+  }
+}
