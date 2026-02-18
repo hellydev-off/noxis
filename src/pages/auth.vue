@@ -64,7 +64,7 @@ async function submit() {
   const body = { username: username.value, password: password.value };
 
   try {
-    const res = await fetch("http://localhost:3000" + url, {
+    const res = await fetch("https://noxis-server-xmbj.onrender.com" + url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
