@@ -6,9 +6,11 @@
       </Transition>
     </RouterView>
 
-    <div v-else class="app-loader">Загрузка профиля...</div>
-    <button @click="auth('safari')">Safari</button>
-    <button @click="auth('chrome')">Chrome</button>
+    <div v-else class="app-loader">
+      Загрузка профиля...
+      <button @click="auth('safari')">Safari</button>
+      <button @click="auth('chrome')">Chrome</button>
+    </div>
   </AppShell>
 </template>
 
