@@ -21,11 +21,6 @@
           <input v-model="username" type="text" required />
         </div>
 
-        <div>
-          <label>Password</label>
-          <input v-model="password" type="password" required />
-        </div>
-
         <button type="submit" :disabled="loading">
           {{
             loading
@@ -61,7 +56,7 @@ async function submit() {
   error.value = "";
 
   const url = mode.value === "login" ? "/api/login" : "/api/register";
-  const body = { username: username.value, password: password.value };
+  const body = { username: username.value };
 
   try {
     const res = await fetch("https://noxis-server-xmbj.onrender.com" + url, {
