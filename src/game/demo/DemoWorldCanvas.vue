@@ -218,7 +218,7 @@ function desiredZoom(massList, speed) {
 }
 
 function setupSocket() {
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem("user_id");
   socket = io("https://noxis-server-xmbj.onrender.com", { auth: { token } });
 
   socket.on("connect", () => {
