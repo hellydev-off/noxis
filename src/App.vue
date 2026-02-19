@@ -7,6 +7,8 @@
     </RouterView>
 
     <div v-else class="app-loader">Загрузка профиля...</div>
+    <button @click="auth('safari')">Safari</button>
+    <button @click="auth('chrome')">Chrome</button>
   </AppShell>
 </template>
 
@@ -15,6 +17,16 @@ import { onBeforeMount } from "vue";
 import { RouterView } from "vue-router";
 import AppShell from "@/ui/layout/AppShell.vue";
 import { useUserStore } from "@/store/userStore"; // Путь к вашему файлу стора
+
+const auth = async (type) => {
+  if (type === "chrome") {
+    localStorage.setItem("user_id", "953111621");
+    await userStore.fetchUser();
+  } else {
+    localStorage.setItem("user_id", "1151145770");
+    await userStore.fetchUser();
+  }
+};
 
 const userStore = useUserStore();
 
