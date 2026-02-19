@@ -8,8 +8,8 @@
 
     <div v-else class="app-loader">
       Загрузка профиля...
-      <button @click="auth('safari')">Safari</button>
-      <button @click="auth('chrome')">Chrome</button>
+      <button @click="auth('safari')">Серега</button>
+      <button @click="auth('chrome')">Максон</button>
     </div>
   </AppShell>
 </template>
@@ -25,7 +25,7 @@ const auth = async (type) => {
     localStorage.setItem("user_id", "953111621");
     await userStore.fetchUser();
   } else {
-    localStorage.setItem("user_id", "1151145770");
+    localStorage.setItem("user_id", "980842420");
     await userStore.fetchUser();
   }
 };
