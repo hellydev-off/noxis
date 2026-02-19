@@ -11,10 +11,15 @@
           <div class="name n-title">{{ player.username }}</div>
           <div class="rank n-subtle">RANK: #42 • LEAGUE: ARC</div>
         </GlassPanel>
-
+        <button @click="auth('safari')">Safari</button>
+        <button @click="auth('chrome')">Chrome</button>
         <div class="right">
           <div class="stats">
-            <StatCard label="TOTAL MASS COLLECTED" :value="9284012" glow="purple" />
+            <StatCard
+              label="TOTAL MASS COLLECTED"
+              :value="9284012"
+              glow="purple"
+            />
             <StatCard label="TOTAL KILLS" :value="12840" glow="cyan" />
             <StatCard label="WINS" :value="632" glow="purple" />
             <StatCard label="WIN RATE" :value="58" suffix="%" glow="cyan" />
@@ -29,11 +34,19 @@
 </template>
 
 <script setup>
-import BottomNav from '@/ui/layout/BottomNav.vue'
-import TopBar from '@/ui/layout/TopBar.vue'
-import GlassPanel from '@/ui/primitives/GlassPanel.vue'
-import StatCard from '@/ui/cards/StatCard.vue'
-import { player } from '@/ui/state/player'
+import BottomNav from "@/ui/layout/BottomNav.vue";
+import TopBar from "@/ui/layout/TopBar.vue";
+import GlassPanel from "@/ui/primitives/GlassPanel.vue";
+import StatCard from "@/ui/cards/StatCard.vue";
+import { player } from "@/ui/state/player";
+
+const auth = (type) => {
+  if (type === "chrome") {
+    localStorage.setItem("user_id", "953111621");
+  } else {
+    localStorage.setItem("user_id", "1151145770");
+  }
+};
 </script>
 
 <style scoped>
@@ -73,18 +86,33 @@ import { player } from '@/ui/state/player'
   width: 148px;
   height: 148px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   background:
-    radial-gradient(50px 50px at 28% 28%, rgba(255, 255, 255, 0.18), transparent 62%),
-    radial-gradient(90px 90px at 72% 78%, rgba(0, 245, 255, 0.12), transparent 62%),
-    radial-gradient(circle at 40% 40%, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01) 56%, rgba(0, 0, 0, 0.20) 100%);
-  box-shadow: var(--n-glow-cyan), 0 20px 60px rgba(0, 0, 0, 0.55);
+    radial-gradient(
+      50px 50px at 28% 28%,
+      rgba(255, 255, 255, 0.18),
+      transparent 62%
+    ),
+    radial-gradient(
+      90px 90px at 72% 78%,
+      rgba(0, 245, 255, 0.12),
+      transparent 62%
+    ),
+    radial-gradient(
+      circle at 40% 40%,
+      rgba(255, 255, 255, 0.05),
+      rgba(255, 255, 255, 0.01) 56%,
+      rgba(0, 0, 0, 0.2) 100%
+    );
+  box-shadow:
+    var(--n-glow-cyan),
+    0 20px 60px rgba(0, 0, 0, 0.55);
   position: relative;
   overflow: hidden;
 }
 
 .bigOrb::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: -40%;
   background: conic-gradient(
@@ -139,4 +167,3 @@ import { player } from '@/ui/state/player'
   }
 }
 </style>
-

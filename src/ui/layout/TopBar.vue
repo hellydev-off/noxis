@@ -11,11 +11,7 @@
       <div class="wallet">
         <div class="chip">
           <span class="label">CR</span>
-          <span class="value">{{ player.currency }}</span>
-        </div>
-        <div class="chip cyan">
-          <span class="label">EX</span>
-          <span class="value">{{ player.premium }}</span>
+          <span class="value">{{ getUserInfo.balance }}</span>
         </div>
       </div>
 
@@ -46,9 +42,9 @@
       <div class="profile">
         <div class="avatar" />
         <div class="meta">
-          <div class="name">{{ player.username }}</div>
+          <div class="name">{{ getUserInfo.username }}</div>
           <div class="level">
-            <span class="badge">Lv {{ player.level }}</span>
+            <span class="badge">Lv {{ getUserInfo.level }}</span>
           </div>
         </div>
       </div>
@@ -57,8 +53,14 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { player } from "@/ui/state/player";
+import { useUserStore } from "@/store/userStore";
+const userStore = useUserStore();
+const getUserInfo = computed(() => userStore.getUserInfo);
+
+console.log(getUserInfo.value);
 
 const router = useRouter();
 function goHome() {

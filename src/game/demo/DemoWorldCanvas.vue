@@ -3,10 +3,10 @@
     ref="canvasEl"
     class="c"
     aria-label="Game world"
-    @pointermove="onPointerMove"
-    @pointerdown="onPointerDown"
-    @pointerup="onPointerUp"
-    @pointerleave="onPointerUp"
+    tabindex="0"
+    @keydown.prevent="onKeyDown"
+    @keyup.prevent="onKeyUp"
+    @blur="onBlur"
   />
   <div
     v-if="isMobile"
@@ -29,7 +29,14 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import { demoSettings } from "@/game/demo/demoSettings";
 import { io } from "socket.io-client";
 
@@ -38,6 +45,7 @@ const emit = defineEmits([
   "update:radarPings",
   "update:leaderboard",
   "died",
+  "update:bonus-counts", // новое событие для передачи количества бонусов
 ]);
 
 const canvasEl = ref(null);
@@ -51,6 +59,42 @@ let dpr = 1;
 let w = 0;
 let h = 0;
 let leaderboardAcc = 0;
+
+// ========== ЭКСПОРТИРУЕМЫЕ МЕТОДЫ ==========
+function splitDash() {
+  if (!state.alive) return;
+  socket?.emit("action", { type: "split" });
+}
+function eject() {
+  if (!state.alive) return;
+  socket?.emit("action", { type: "eject" });
+}
+function activateShield() {
+  if (!state.alive) return;
+  socket?.emit("action", { type: "shield" });
+}
+function activateTurbo() {
+  if (!state.alive) return;
+  socket?.emit("action", { type: "turbo" });
+}
+function activateSpike() {
+  if (!state.alive) return;
+  socket?.emit("action", { type: "spike" });
+}
+function activateFreeze() {
+  if (!state.alive) return;
+  socket?.emit("action", { type: "freeze" });
+}
+function respawn() {
+  if (socket && !state.alive) {
+    socket.emit("respawn");
+    state.alive = true;
+  }
+}
+function focusCanvas() {
+  canvasEl.value?.focus();
+}
+// ===========================================
 
 // === КОНСТАНТЫ ===
 const MAP_R = 5000;
@@ -76,16 +120,20 @@ const PELLET_COLORS = [
   "#ffd700",
 ];
 
-// --- Определение мобильного устройства ---
 const isMobile = ref(window.matchMedia("(max-width: 768px)").matches);
-
 function checkMobile() {
   isMobile.value = window.matchMedia("(max-width: 768px)").matches;
 }
 window.addEventListener("resize", checkMobile);
 onBeforeUnmount(() => window.removeEventListener("resize", checkMobile));
 
-// --- Состояние джойстика ---
+const keys = reactive({
+  w: false,
+  a: false,
+  s: false,
+  d: false,
+});
+
 const joystick = ref({
   active: false,
   angle: 0,
@@ -96,9 +144,7 @@ const joystick = ref({
   currentY: 0,
 });
 
-// --- Кеш изображений и функция загрузки ---
 const imageCache = new Map();
-
 function loadImage(url) {
   if (!url) return Promise.reject("No URL");
   if (imageCache.has(url)) {
@@ -116,43 +162,36 @@ function loadImage(url) {
   });
 }
 
-const state = {
+// --- Состояние игры ---
+const state = reactive({
   alive: true,
-  pointerDown: false,
-  pointer: { x: 0, y: 0 },
   cam: { x: 0, y: 0, zoom: 0.85 },
   pellets: [],
-  enemies: [],
+  allCells: [],
   fx: [],
+  spikes: [],
   lastMass: 0,
-  cells: [
-    {
-      id: null,
-      x: 0,
-      y: 0,
-      tx: 0,
-      ty: 0,
-      mass: 50,
-      targetMass: 50,
-      vx: 0,
-      vy: 0,
-      angle: 0,
-      pulse: 0,
-      tone: "purple",
-      shield: 0,
-      turbo: 0,
-      skinUrl: null,
-    },
-  ],
+  time: 0,
   pendingEatIds: new Map(),
   rejectedEatIds: new Map(),
-  time: 0,
-};
+  // Количества бонусов (приходят с сервера)
+  bonusCounts: {
+    spike: 3,
+    freeze: 2,
+  },
+});
 
-const MASS_THRESHOLD = 1000;
-const SPEED_AT_THRESHOLD = 700;
+const myCells = computed(() =>
+  state.allCells.filter((c) => c.ownerId === socket?.id),
+);
+const enemyCells = computed(() =>
+  state.allCells.filter((c) => c.ownerId !== socket?.id),
+);
 
-// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+const totalPlayerMass = computed(() =>
+  myCells.value.reduce((sum, cell) => sum + cell.mass, 0),
+);
+
 function clamp(v, a, b) {
   return Math.max(a, Math.min(b, v));
 }
@@ -170,31 +209,26 @@ function pelletRadius(mass) {
   return clamp(Math.sqrt(mass) * 2.5, 4, 18);
 }
 
-function desiredZoom(m, speed) {
-  const massFactor = Math.pow(m / 5000, 0.3);
+function desiredZoom(massList, speed) {
+  const maxMass = Math.max(...massList, 50);
+  const massFactor = Math.pow(maxMass / 5000, 0.3);
   const baseZoom = 1.2 / (1 + massFactor * 0.6);
   const speedZoom = 1 / (1 + speed / 2500);
   return clamp(baseZoom * speedZoom, 0.15, 1.2);
 }
 
-// === СЕТЕВАЯ ЛОГИКА ===
 function setupSocket() {
   const token = localStorage.getItem("token");
   socket = io("https://noxis-server-xmbj.onrender.com", { auth: { token } });
 
   socket.on("connect", () => {
     console.log("Connected as:", socket.id);
-    socket.emit("join-game");
-
-    // Устанавливаем скин игрока из demoSettings
-    const main = state.cells[0];
     const skinUrl = demoSettings.equipment.skin;
-    if (skinUrl && skinUrl !== main.skinUrl) {
-      main.skinUrl = skinUrl;
+    socket.emit("join-game", { skinUrl });
+    if (skinUrl) {
       loadImage(skinUrl).catch((err) =>
         console.warn("Failed to load skin", err),
       );
-      // При необходимости отправить на сервер: socket.emit("set-skin", { skinUrl });
     }
   });
 
@@ -222,10 +256,17 @@ function setupSocket() {
     }
     state.pellets = pelletsFromServer;
     state.alive = true;
+
+    // Инициализация бонусов (позже от сервера)
+    if (data.bonusCounts) {
+      state.bonusCounts = data.bonusCounts;
+      emit("update:bonus-counts", state.bonusCounts);
+    }
   });
 
   socket.on("world_update", (data) => {
     const now = performance.now() / 1000;
+    // Обновление пеллет
     const serverPellets = data.pellets.filter(
       (p) => !p.id.startsWith("local-"),
     );
@@ -259,59 +300,86 @@ function setupSocket() {
       }
     }
 
-    const serverPlayers = data.players;
-    const me = serverPlayers.find((p) => p.id === socket.id);
-    if (me && state.alive) {
-      const main = state.cells[0];
-      main.tx = me.x;
-      main.ty = me.y;
-      if (Math.abs(me.mass - main.targetMass) > 50) {
-        main.targetMass = me.mass;
+    // Обновление клеток
+    const serverCells = data.cells;
+    const serverCellMap = new Map(serverCells.map((c) => [c.id, c]));
+
+    for (let i = state.allCells.length - 1; i >= 0; i--) {
+      const localCell = state.allCells[i];
+      if (!serverCellMap.has(localCell.id)) {
+        state.allCells.splice(i, 1);
       }
-      main.id = me.id;
-      main.shield = me.shield || 0;
-      // Скин с сервера не принимаем, используем локальный
     }
 
-    const enemyMap = new Map(state.enemies.map((e) => [e.id, e]));
-    for (const p of serverPlayers) {
-      if (p.id === socket.id) continue;
-      if (enemyMap.has(p.id)) {
-        const e = enemyMap.get(p.id);
-        e.tx = p.x;
-        e.ty = p.y;
-        e.mass = p.mass;
-        if (p.skinUrl && p.skinUrl !== e.skinUrl) {
-          e.skinUrl = p.skinUrl;
-          loadImage(p.skinUrl).catch((err) =>
-            console.warn("Failed to load enemy skin", err),
-          );
+    for (const sc of serverCells) {
+      const local = state.allCells.find((c) => c.id === sc.id);
+      if (local) {
+        local.tx = sc.x;
+        local.ty = sc.y;
+        local.mass = sc.mass;
+        local.angle = sc.angle;
+        local.shieldUntil = sc.shieldUntil;
+        local.turboUntil = sc.turboUntil;
+        local.frozenUntil = sc.frozenUntil;
+        if (sc.skinUrl && sc.skinUrl !== local.skinUrl) {
+          local.skinUrl = sc.skinUrl;
+          loadImage(sc.skinUrl).catch(() => {});
         }
       } else {
-        state.enemies.push({
-          id: p.id,
-          x: p.x,
-          y: p.y,
-          tx: p.x,
-          ty: p.y,
-          mass: p.mass,
-          skinUrl: p.skinUrl,
-        });
-        if (p.skinUrl) {
-          loadImage(p.skinUrl).catch((err) =>
-            console.warn("Failed to load enemy skin", err),
-          );
+        const newCell = {
+          id: sc.id,
+          ownerId: sc.ownerId,
+          username: sc.username,
+          x: sc.x,
+          y: sc.y,
+          tx: sc.x,
+          ty: sc.y,
+          mass: sc.mass,
+          angle: sc.angle,
+          shieldUntil: sc.shieldUntil,
+          turboUntil: sc.turboUntil,
+          frozenUntil: sc.frozenUntil,
+          skinUrl: sc.skinUrl,
+          vx: 0,
+          vy: 0,
+          pulse: 0,
+        };
+        state.allCells.push(newCell);
+        if (sc.skinUrl) {
+          loadImage(sc.skinUrl).catch(() => {});
         }
       }
     }
-    state.enemies = state.enemies.filter((e) =>
-      serverPlayers.some((p) => p.id === e.id),
-    );
+
+    // Обновление снарядов
+    state.spikes = data.spikes || [];
+
+    // Обновление количества бонусов (если пришло)
+    if (data.bonusCounts) {
+      state.bonusCounts = data.bonusCounts;
+      emit("update:bonus-counts", state.bonusCounts);
+    }
+
+    if (myCells.value.length === 0 && state.alive) {
+      state.alive = false;
+      emit("died", { reason: "eaten" });
+    }
+  });
+
+  socket.on("cell-destroyed", (data) => {
+    const index = state.allCells.findIndex((c) => c.id === data.cellId);
+    if (index !== -1) {
+      state.allCells.splice(index, 1);
+    }
   });
 
   socket.on("game-over", (data) => {
     state.alive = false;
     emit("died", data);
+  });
+
+  socket.on("spike-hit", (data) => {
+    state.fx.push({ x: data.x, y: data.y, t: 0, type: "spike" });
   });
 
   socket.on("connect_error", (err) => {
@@ -333,63 +401,15 @@ function resize() {
   if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function screenToWorld(sx, sy) {
-  const { cam } = state;
-  const cx = w * 0.5;
-  const cy = h * 0.5;
-  return {
-    x: (sx - cx) / cam.zoom + cam.x,
-    y: (sy - cy) / cam.zoom + cam.y,
-  };
-}
-
-function onPointerMove(e) {
-  if (!state.alive) return;
-  const rect = e.currentTarget.getBoundingClientRect();
-  const p = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
-  state.pointer.x = p.x;
-  state.pointer.y = p.y;
-}
-
-function onPointerDown(e) {
-  if (!state.alive) return;
-  state.pointerDown = true;
-  onPointerMove(e);
-}
-function onPointerUp() {
-  state.pointerDown = false;
-}
-
 // === ОБНОВЛЕНИЕ ===
-function segmentIntersectsCircle(x1, y1, x2, y2, cx, cy, r) {
-  const d1 = Math.hypot(x1 - cx, y1 - cy);
-  const d2 = Math.hypot(x2 - cx, y2 - cy);
-  if (d1 <= r || d2 <= r) return true;
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.hypot(dx, dy);
-  if (len === 0) return false;
-  const dot = ((cx - x1) * dx + (cy - y1) * dy) / (len * len);
-  const t = Math.max(0, Math.min(1, dot));
-  const projX = x1 + t * dx;
-  const projY = y1 + t * dy;
-  return Math.hypot(projX - cx, projY - cy) <= r;
-}
-
 function applyAttraction(dt) {
-  const main = state.cells[0];
-  if (!main || !state.alive) return;
-
-  const cells = [
-    { type: "player", x: main.x, y: main.y, mass: main.mass, id: main.id },
-    ...state.enemies.map((e) => ({
-      type: "enemy",
-      x: e.x,
-      y: e.y,
-      mass: e.mass,
-      id: e.id,
-    })),
-  ];
+  const cells = state.allCells.map((c) => ({
+    type: c.ownerId === socket?.id ? "player" : "enemy",
+    x: c.x,
+    y: c.y,
+    mass: c.mass,
+    id: c.id,
+  }));
 
   for (const p of state.pellets) {
     let closest = null;
@@ -437,89 +457,45 @@ function applyAttraction(dt) {
 function update(dt) {
   state.time += dt;
 
-  const main = state.cells[0];
-  if (!main || !socket || !state.alive) return;
+  if (!socket || !state.alive) return;
 
-  const oldX = main.x;
-  const oldY = main.y;
+  let targetAngle = 0;
+  let targetFactor = 0;
 
-  // === УПРАВЛЕНИЕ: джойстик или мышь ===
-  let targetAngle;
-  let desiredSpeed;
-
-  if (joystick.value.active && joystick.value.force > 0.01) {
-    // Управление джойстиком
-    targetAngle = joystick.value.angle;
-    const baseSpeed =
-      main.mass <= MASS_THRESHOLD
-        ? SPEED_AT_THRESHOLD
-        : SPEED_AT_THRESHOLD * Math.sqrt(MASS_THRESHOLD / main.mass);
-    desiredSpeed = baseSpeed * joystick.value.force;
+  if (isMobile.value) {
+    if (joystick.value.active && joystick.value.force > 0.01) {
+      targetAngle = joystick.value.angle;
+      targetFactor = joystick.value.force;
+    }
   } else {
-    // Управление мышью / касанием (работает как раньше)
-    targetAngle = Math.atan2(
-      state.pointer.y - main.y,
-      state.pointer.x - main.x,
-    );
-    if (main.mass <= MASS_THRESHOLD) {
-      desiredSpeed = SPEED_AT_THRESHOLD;
-    } else {
-      desiredSpeed = SPEED_AT_THRESHOLD * Math.sqrt(MASS_THRESHOLD / main.mass);
+    const dx = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
+    const dy = (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
+    const length = Math.hypot(dx, dy);
+    if (length > 0.01) {
+      targetAngle = Math.atan2(dy, dx);
+      targetFactor = 1;
     }
   }
 
-  // Плавный поворот к целевому углу
-  let angleDiff = targetAngle - main.angle;
-  while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-  while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-  const turnSpeed = 8.0;
-  const maxTurn = turnSpeed * dt;
-  if (Math.abs(angleDiff) > maxTurn) {
-    main.angle += Math.sign(angleDiff) * maxTurn;
-  } else {
-    main.angle = targetAngle;
+  socket.emit("move", { angle: targetAngle, factor: targetFactor });
+
+  for (const cell of myCells.value) {
+    if (cell.tx !== undefined) {
+      const speed = 8;
+      cell.x = lerp(cell.x, cell.tx, Math.min(1, speed * dt));
+      cell.y = lerp(cell.y, cell.ty, Math.min(1, speed * dt));
+    }
+    cell.pulse *= 1 - dt * 8;
+    if (cell.pulse < 0.01) cell.pulse = 0;
   }
 
-  const desiredVx = Math.cos(main.angle) * desiredSpeed;
-  const desiredVy = Math.sin(main.angle) * desiredSpeed;
-
-  const inertia = 0.15;
-  main.vx = lerp(main.vx, desiredVx, inertia);
-  main.vy = lerp(main.vy, desiredVy, inertia);
-
-  let newX = main.x + main.vx * dt;
-  let newY = main.y + main.vy * dt;
-
-  const playerRadius = massToRadius(main.mass, main.pulse);
-  const distFromOrigin = Math.hypot(newX, newY);
-  if (distFromOrigin + playerRadius > MAP_R) {
-    const angleToOrigin = Math.atan2(newY, newX);
-    newX = Math.cos(angleToOrigin) * (MAP_R - playerRadius);
-    newY = Math.sin(angleToOrigin) * (MAP_R - playerRadius);
-    const radialSpeed =
-      main.vx * Math.cos(angleToOrigin) + main.vy * Math.sin(angleToOrigin);
-    if (radialSpeed > 0) {
-      main.vx -= radialSpeed * Math.cos(angleToOrigin);
-      main.vy -= radialSpeed * Math.sin(angleToOrigin);
+  for (const cell of enemyCells.value) {
+    if (cell.tx !== undefined) {
+      const speed = 6;
+      cell.x = lerp(cell.x, cell.tx, Math.min(1, speed * dt));
+      cell.y = lerp(cell.y, cell.ty, Math.min(1, speed * dt));
     }
   }
-  main.x = newX;
-  main.y = newY;
-
-  socket.emit("move", { angle: main.angle });
-
-  if (main.targetMass !== main.mass) {
-    const diff = main.targetMass - main.mass;
-    const change = diff * 5 * dt;
-    if (Math.abs(change) < 0.1 && Math.abs(diff) < 1) {
-      main.mass = main.targetMass;
-    } else {
-      main.mass += change;
-    }
-  }
-
-  main.pulse *= 1 - dt * 8;
-  if (main.pulse < 0.01) main.pulse = 0;
 
   applyAttraction(dt);
 
@@ -533,76 +509,53 @@ function update(dt) {
       else state.rejectedEatIds.delete(p.id);
     }
 
-    const pelletR = pelletRadius(p.v);
-    const collision = segmentIntersectsCircle(
-      oldX,
-      oldY,
-      main.x,
-      main.y,
-      p.x,
-      p.y,
-      playerRadius + pelletR,
-    );
-
-    if (collision) {
-      if (p.id.startsWith("local-")) {
-        state.pellets.splice(i, 1);
-        main.targetMass += p.v;
-        main.pulse = 0.5;
-        state.fx.push({ x: p.x, y: p.y, t: 0 });
-        const angle = Math.random() * Math.PI * 2;
-        const r = Math.random() * MAP_R * 0.9;
-        state.pellets.push({
-          id: `local-${Date.now()}-${Math.random()}`,
-          x: Math.cos(angle) * r,
-          y: Math.sin(angle) * r,
-          tx: Math.cos(angle) * r,
-          ty: Math.sin(angle) * r,
-          v: Math.floor(Math.random() * 30) + 5,
-          local: true,
-        });
-        continue;
-      }
-
-      socket.emit(
-        "eat-pellet",
-        {
-          pelletId: p.id,
-          playerX: main.x,
-          playerY: main.y,
-          pelletX: p.x,
-          pelletY: p.y,
-        },
-        (response) => {
-          if (response?.success) {
-            state.pendingEatIds.delete(p.id);
-          } else {
-            state.rejectedEatIds.set(p.id, now + 1);
-            state.pendingEatIds.delete(p.id);
-          }
-        },
-      );
-
-      state.pendingEatIds.set(p.id, now);
-      state.pellets.splice(i, 1);
-      main.targetMass += p.v;
-      main.pulse = 0.5;
-      state.fx.push({ x: p.x, y: p.y, t: 0 });
-    }
-  }
-
-  for (let i = state.pellets.length - 1; i >= 0; i--) {
-    const p = state.pellets[i];
-    for (const e of state.enemies) {
-      const enemyR = massToRadius(e.mass);
+    for (const cell of myCells.value) {
+      const cellR = massToRadius(cell.mass, cell.pulse);
       const pelletR = pelletRadius(p.v);
-      const dist = Math.hypot(e.x - p.x, e.y - p.y);
-      if (dist < enemyR + pelletR) {
-        if (!p.id.startsWith("local-")) {
-          state.rejectedEatIds.set(p.id, now + 2);
+      const dist = Math.hypot(cell.x - p.x, cell.y - p.y);
+      if (dist < cellR + pelletR) {
+        if (p.id.startsWith("local-")) {
+          state.pellets.splice(i, 1);
+          cell.mass += p.v;
+          cell.pulse = 0.5;
+          state.fx.push({ x: p.x, y: p.y, t: 0 });
+          const angle = Math.random() * Math.PI * 2;
+          const r = Math.random() * MAP_R * 0.9;
+          state.pellets.push({
+            id: `local-${Date.now()}-${Math.random()}`,
+            x: Math.cos(angle) * r,
+            y: Math.sin(angle) * r,
+            tx: Math.cos(angle) * r,
+            ty: Math.sin(angle) * r,
+            v: Math.floor(Math.random() * 30) + 5,
+            local: true,
+          });
+          break;
+        } else {
+          socket.emit(
+            "eat-pellet",
+            {
+              pelletId: p.id,
+              playerX: cell.x,
+              playerY: cell.y,
+              pelletX: p.x,
+              pelletY: p.y,
+            },
+            (response) => {
+              if (response?.success) {
+                state.pendingEatIds.delete(p.id);
+              } else {
+                state.rejectedEatIds.set(p.id, now + 1);
+                state.pendingEatIds.delete(p.id);
+              }
+            },
+          );
+          state.pendingEatIds.set(p.id, now);
+          state.pellets.splice(i, 1);
+          cell.pulse = 0.5;
+          state.fx.push({ x: p.x, y: p.y, t: 0 });
+          break;
         }
-        state.pellets.splice(i, 1);
-        break;
       }
     }
   }
@@ -614,52 +567,33 @@ function update(dt) {
     if (now > until) state.rejectedEatIds.delete(id);
   }
 
-  if (main.tx !== undefined && main.ty !== undefined) {
-    let targetX = main.tx;
-    let targetY = main.ty;
-    const targetDist = Math.hypot(targetX, targetY);
-    if (targetDist + playerRadius > MAP_R) {
-      const angle = Math.atan2(targetY, targetX);
-      targetX = Math.cos(angle) * (MAP_R - playerRadius);
-      targetY = Math.sin(angle) * (MAP_R - playerRadius);
-    }
+  if (myCells.value.length > 0) {
+    const avgX =
+      myCells.value.reduce((sum, c) => sum + c.x, 0) / myCells.value.length;
+    const avgY =
+      myCells.value.reduce((sum, c) => sum + c.y, 0) / myCells.value.length;
+    const masses = myCells.value.map((c) => c.mass);
+    const avgSpeed =
+      myCells.value.reduce((sum, c) => {
+        const vx = c.vx || 0;
+        const vy = c.vy || 0;
+        return sum + Math.hypot(vx, vy);
+      }, 0) / myCells.value.length;
 
-    const errorX = targetX - main.x;
-    const errorY = targetY - main.y;
-
-    const isMoving = Math.hypot(desiredVx, desiredVy) > 10;
-    const correctionFactor = isMoving ? 3 : 15;
-    let correctionX = errorX * correctionFactor * dt;
-    let correctionY = errorY * correctionFactor * dt;
-
-    const maxCorrection = 1.5 * desiredSpeed * dt;
-    const correctionDist = Math.hypot(correctionX, correctionY);
-    if (correctionDist > maxCorrection) {
-      correctionX *= maxCorrection / correctionDist;
-      correctionY *= maxCorrection / correctionDist;
-    }
-
-    main.x += correctionX;
-    main.y += correctionY;
+    const targetZoom = desiredZoom(masses, avgSpeed);
+    state.cam.zoom = lerp(state.cam.zoom, targetZoom, dt * 8);
+    state.cam.x = lerp(state.cam.x, avgX, dt * 8);
+    state.cam.y = lerp(state.cam.y, avgY, dt * 8);
   }
 
-  const enemyLerp = Math.min(20, 2 / dt);
-  for (const e of state.enemies) {
-    if (e.tx !== undefined) {
-      e.x = lerp(e.x, e.tx, enemyLerp * dt);
-      e.y = lerp(e.y, e.ty, enemyLerp * dt);
-    }
+  for (let i = state.fx.length - 1; i >= 0; i--) {
+    const f = state.fx[i];
+    f.t += dt;
+    if (f.t > 0.6) state.fx.splice(i, 1);
   }
 
-  const targetZoom = desiredZoom(main.mass, Math.hypot(main.vx, main.vy));
-  const zoomDiff = targetZoom - state.cam.zoom;
-  state.cam.zoom += zoomDiff * Math.min(1, dt * 8);
-  state.cam.x = lerp(state.cam.x, main.x, dt * 8);
-  state.cam.y = lerp(state.cam.y, main.y, dt * 8);
-
-  updateFx(dt);
-  state.lastMass = Math.floor(main.mass);
-  emit("update:mass", state.lastMass);
+  state.lastMass = totalPlayerMass.value;
+  emit("update:mass", Math.floor(state.lastMass));
 
   leaderboardAcc += dt;
   if (leaderboardAcc >= 0.5) {
@@ -667,13 +601,13 @@ function update(dt) {
     leaderboardAcc = 0;
   }
 
-  updateRadar(main);
+  updateRadar();
 }
 
 function updateLeaderboard() {
   const list = [
     { name: "YOU", value: state.lastMass, isYou: true },
-    ...state.enemies.map((e) => ({
+    ...enemyCells.value.map((e) => ({
       name: e.username || "Enemy",
       value: Math.floor(e.mass),
       isYou: false,
@@ -686,9 +620,11 @@ function updateLeaderboard() {
   );
 }
 
-function updateRadar(mainCell) {
+function updateRadar() {
+  if (myCells.value.length === 0) return;
+  const mainCell = myCells.value[0];
   const range = 5000;
-  const radarPings = state.enemies.map((e) => ({
+  const radarPings = enemyCells.value.map((e) => ({
     x: clamp(0.5 + ((e.x - mainCell.x) / range) * 0.5, 0, 1),
     y: clamp(0.5 + ((e.y - mainCell.y) / range) * 0.5, 0, 1),
     tone: e.mass > mainCell.mass ? "danger" : "cyan",
@@ -699,14 +635,6 @@ function updateRadar(mainCell) {
     ),
   }));
   emit("update:radarPings", radarPings);
-}
-
-function updateFx(dt) {
-  for (let i = state.fx.length - 1; i >= 0; i--) {
-    const f = state.fx[i];
-    f.t += dt;
-    if (f.t > 0.6) state.fx.splice(i, 1);
-  }
 }
 
 // === ОТРИСОВКА ===
@@ -778,8 +706,20 @@ function draw() {
   ctx.shadowBlur = 0;
   ctx.shadowColor = "transparent";
 
-  // Враги (со скинами)
-  for (const e of state.enemies) {
+  // Снаряды (шипы)
+  ctx.shadowColor = "#ff0000";
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = "#ff4444";
+  for (const spike of state.spikes) {
+    ctx.beginPath();
+    ctx.arc(spike.x, spike.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+
+  // Враги
+  const now = Date.now();
+  for (const e of enemyCells.value) {
     const r = massToRadius(e.mass);
     ctx.save();
     ctx.beginPath();
@@ -794,33 +734,53 @@ function draw() {
       ctx.fill();
     }
     ctx.restore();
-
     ctx.strokeStyle = "#7c3aed";
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    if (e.frozenUntil && e.frozenUntil > now) {
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, r + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = "#00aaff";
+      ctx.lineWidth = 4;
+      ctx.setLineDash([5, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (e.shieldUntil && e.shieldUntil > now) {
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, r + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = "#00ffff";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+    if (e.turboUntil && e.turboUntil > now) {
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, r + 2, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffaa00";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
   }
 
-  // Игрок (со скином или градиентом)
-  if (state.alive) {
-    const main = state.cells[0];
-    const r = massToRadius(main.mass, main.pulse);
-
+  // Свои клетки
+  for (const cell of myCells.value) {
+    const r = massToRadius(cell.mass, cell.pulse);
     ctx.save();
     ctx.beginPath();
-    ctx.arc(main.x, main.y, r, 0, Math.PI * 2);
+    ctx.arc(cell.x, cell.y, r, 0, Math.PI * 2);
     ctx.clip();
 
-    if (main.skinUrl && imageCache.has(main.skinUrl)) {
-      const img = imageCache.get(main.skinUrl);
-      ctx.drawImage(img, main.x - r, main.y - r, r * 2, r * 2);
+    if (cell.skinUrl && imageCache.has(cell.skinUrl)) {
+      const img = imageCache.get(cell.skinUrl);
+      ctx.drawImage(img, cell.x - r, cell.y - r, r * 2, r * 2);
     } else {
-      // Градиент с фиксированным цветом
       const grd = ctx.createRadialGradient(
-        main.x,
-        main.y,
+        cell.x,
+        cell.y,
         r * 0.2,
-        main.x,
-        main.y,
+        cell.x,
+        cell.y,
         r,
       );
       grd.addColorStop(0, "#00f5ff");
@@ -833,6 +793,31 @@ function draw() {
     ctx.strokeStyle = "#fff";
     ctx.lineWidth = 3;
     ctx.stroke();
+
+    const now = Date.now();
+    if (cell.shieldUntil && cell.shieldUntil > now) {
+      ctx.beginPath();
+      ctx.arc(cell.x, cell.y, r + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = "#00ffff";
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+    if (cell.turboUntil && cell.turboUntil > now) {
+      ctx.beginPath();
+      ctx.arc(cell.x, cell.y, r + 2, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffaa00";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+  }
+
+  // Эффекты
+  for (const f of state.fx) {
+    const alpha = 1 - f.t / 0.6;
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+    ctx.arc(f.x, f.y, 20 * (1 + f.t), 0, Math.PI * 2);
+    ctx.fill();
   }
 
   ctx.restore();
@@ -846,19 +831,29 @@ function tick(t) {
   raf = requestAnimationFrame(tick);
 }
 
-onMounted(() => {
-  resize();
-  setupSocket();
-  window.addEventListener("resize", resize);
-  lastT = performance.now();
-  raf = requestAnimationFrame(tick);
-});
+// === ОБРАБОТЧИКИ КЛАВИАТУРЫ ===
+function onKeyDown(e) {
+  if (isMobile.value) return;
+  const key = e.key.toLowerCase();
+  if (key === "w" || key === "a" || key === "s" || key === "d") {
+    keys[key] = true;
+  }
+}
 
-onBeforeUnmount(() => {
-  if (socket) socket.disconnect();
-  window.removeEventListener("resize", resize);
-  cancelAnimationFrame(raf);
-});
+function onKeyUp(e) {
+  if (isMobile.value) return;
+  const key = e.key.toLowerCase();
+  if (key === "w" || key === "a" || key === "s" || key === "d") {
+    keys[key] = false;
+  }
+}
+
+function onBlur() {
+  keys.w = false;
+  keys.a = false;
+  keys.s = false;
+  keys.d = false;
+}
 
 // === МЕТОДЫ ДЖОЙСТИКА ===
 function onJoystickStart(e) {
@@ -889,7 +884,7 @@ function onJoystickEnd(e) {
 }
 
 function updateJoystickFromTouch(touch) {
-  const maxDist = 50; // максимальное смещение джойстика в пикселях
+  const maxDist = 50;
   const dx = touch.clientX - joystick.value.startX;
   const dy = touch.clientY - joystick.value.startY;
   const dist = Math.hypot(dx, dy);
@@ -901,31 +896,51 @@ function updateJoystickFromTouch(touch) {
   joystick.value.currentY = Math.sin(angle) * limitedDist;
 }
 
-// Экспортируемые методы
-function splitDash() {
-  if (!state.alive) return;
-  socket.emit("action", { type: "split" });
-}
-function eject() {
-  if (!state.alive) return;
-  socket.emit("action", { type: "eject" });
-}
-function activateShield() {
-  if (!state.alive) return;
-  socket.emit("action", { type: "shield" });
-}
-function activateTurbo() {
-  if (!state.alive) return;
-  socket.emit("action", { type: "turbo" });
-}
-function respawn() {
-  if (socket && !state.alive) {
-    socket.emit("respawn");
-    state.alive = true;
+watch(isMobile, (newVal) => {
+  if (newVal) {
+    window.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener("keyup", onKeyUp);
+    window.removeEventListener("blur", onBlur);
+  } else {
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
   }
-}
+});
 
-defineExpose({ splitDash, eject, activateShield, activateTurbo, respawn });
+onMounted(() => {
+  resize();
+  setupSocket();
+  window.addEventListener("resize", resize);
+  canvasEl.value?.focus();
+  if (!isMobile.value) {
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+  }
+  lastT = performance.now();
+  raf = requestAnimationFrame(tick);
+});
+
+onBeforeUnmount(() => {
+  if (socket) socket.disconnect();
+  window.removeEventListener("resize", resize);
+  window.removeEventListener("keydown", onKeyDown);
+  window.removeEventListener("keyup", onKeyUp);
+  window.removeEventListener("blur", onBlur);
+  cancelAnimationFrame(raf);
+});
+
+defineExpose({
+  splitDash,
+  eject,
+  activateShield,
+  activateTurbo,
+  activateSpike,
+  activateFreeze,
+  respawn,
+  focusCanvas,
+});
 </script>
 
 <style scoped>
@@ -937,6 +952,7 @@ defineExpose({ splitDash, eject, activateShield, activateTurbo, respawn });
   background: #09090b;
   touch-action: none;
   cursor: crosshair;
+  outline: none;
 }
 
 .joystick-container {

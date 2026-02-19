@@ -15,7 +15,7 @@
           </div>
 
           <div>
-            <Content :category="category" />
+            <Content :items="items" :category="category" />
           </div>
         </section>
       </div>
@@ -26,47 +26,35 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { ref, onMounted } from "vue";
+import axios from "axios";
 import BottomNav from "@/ui/layout/BottomNav.vue";
 import TopBar from "@/ui/layout/TopBar.vue";
-import GlassPanel from "@/ui/primitives/GlassPanel.vue";
-import NeonButton from "@/ui/primitives/NeonButton.vue";
-import OrbPreview from "@/ui/visual/OrbPreview.vue";
 import Sidebar from "@/ui/market/menu/Sidebar.vue";
 import Content from "@/ui/market/content/Content.vue";
 
-const categories = ["Skins", "Boosters", "Abilities", "Loot Boxes", "Premium"];
+import { marketApi } from "@/api/requests/bot";
+
 const category = ref("Skins");
 
 const handleCategoryChange = (c) => {
   category.value = c;
 };
 
-const all = [
-  { name: "Vanta Core", rarity: "common" },
-  { name: "Cyan Pulse", rarity: "rare" },
-  { name: "Nebula Shard", rarity: "epic" },
-  { name: "Aurum Singularity", rarity: "legendary" },
-  { name: "Phantom Drift", rarity: "rare" },
-  { name: "Nightglass", rarity: "common" },
-  { name: "Void Bloom", rarity: "epic" },
-  { name: "Solar Crown", rarity: "legendary" },
-  { name: "Spectral Ion", rarity: "rare" },
-];
+const items = ref([]);
+const loading = ref(true);
 
-const items = computed(() =>
-  all.map((i) => ({
-    ...i,
-    rarityTone:
-      i.rarity === "rare"
-        ? "cyan"
-        : i.rarity === "epic"
-          ? "purple"
-          : i.rarity === "legendary"
-            ? "ghost"
-            : "ghost",
-  })),
-);
+const getItems = async () => {
+  try {
+    const { data } = await marketApi.getItemsFromMarket("skin");
+
+    items.value = data;
+  } catch (error) {
+    console.error("Ошибка:", error);
+  }
+};
+
+onMounted(getItems);
 </script>
 
 <style scoped>

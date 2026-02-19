@@ -1,5 +1,5 @@
 <template>
-  <GlassPanel class="card" interactive>
+  <GlassPanel :class="{ 'is-active': isActive }" class="card" interactive>
     <div class="preview-container" :class="item.rarity">
       <div class="id-ribbon">#{{ item.id }}</div>
 
@@ -17,55 +17,34 @@
     </div>
 
     <div class="content">
-      <h3 class="item-name">{{ item.title }}</h3>
-
       <div class="bottom-info">
-        <div class="price-tag">
-          <span class="currency">$</span>
-          <span class="amount">{{ item.price }}</span>
-        </div>
-        <span class="category-tag">{{ item.type }}</span>
+        <h3 class="item-name">{{ item.title }}</h3>
+        <NeonButton
+          size="sm"
+          :tone="isActive ? 'cyan' : 'ghost'"
+          :loading="loading"
+          :disabled="isActive || loading"
+          @click="$emit('equip', item)"
+        >
+          {{ isActive ? "EQUIPPED" : "EQUIP" }}
+        </NeonButton>
       </div>
     </div>
-
-    <NeonButton
-      @click="butItem"
-      class="buy-btn"
-      size="md"
-      :tone="getRarityTone(item.rarity)"
-    >
-      BUY NOW
-    </NeonButton>
   </GlassPanel>
 </template>
 
 <script setup>
-import axios from "axios";
 import GlassPanel from "@/ui/primitives/GlassPanel.vue";
 import NeonButton from "@/ui/primitives/NeonButton.vue";
-import { marketApi } from "@/api/requests/bot";
+import OrbPreview from "@/ui/visual/OrbPreview.vue";
 
-const props = defineProps({
-  item: { type: Object, required: true },
+defineProps({
+  item: Object,
+  isActive: Boolean,
+  loading: Boolean,
 });
 
-const getRarityTone = (rarity) => {
-  const tones = {
-    common: "default",
-    rare: "cyan",
-    epic: "purple",
-    legendary: "gold",
-  };
-  return tones[rarity] || "default";
-};
-
-const butItem = async () => {
-  try {
-    const { data } = await marketApi.buyItem(props.item, 953111621);
-  } catch (error) {
-    console.error("Ошибка:", error);
-  }
-};
+defineEmits(["equip"]);
 </script>
 
 <style scoped>
@@ -195,7 +174,12 @@ const butItem = async () => {
   font-size: 18px;
   font-weight: 700;
   color: #fff;
-  text-align: center;
+}
+
+.bottom-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .price-tag {
